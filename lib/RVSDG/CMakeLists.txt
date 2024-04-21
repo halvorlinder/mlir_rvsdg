@@ -30,6 +30,6 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/include/RVSDG" DESTINATION include
     FILES_MATCHING PATTERN "*.td"
 )
 
-install(DIRECTORY "${CMAKE_SOURCE_DIR}/build/include/RVSDG" DESTINATION include
+install(DIRECTORY "${CMAKE_BINARY_DIR}/include/RVSDG" DESTINATION include
     FILES_MATCHING PATTERN "*.h.inc"
 )
