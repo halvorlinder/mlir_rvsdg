@@ -10,6 +10,8 @@
 #include "RVSDG/RVSDGOps.h"
 #include "RVSDG/RVSDGASMDirectives.h"
 
+#include <iostream>
+
 using namespace mlir;
 using namespace rvsdg;
 
@@ -197,6 +199,21 @@ mlir::Region* LambdaNode::getCallableRegion() {
   return &this->getRegion();
 }
 
+ArrayAttr LambdaNode::getCallableArgAttrs()
+{
+  // TODO - Implement this function
+  std::cerr << "ArrayAttr LambdaNode::getCallableArgAttrs() - has not been implemented" << std::endl;
+  exit(-1);
+  return {};
+}
+ArrayAttr LambdaNode::getCallableResAttrs()
+{
+  // TODO - Implement this function
+  std::cerr << "ArrayAttr LambdaNode::getCallableResAttrs() - has not been implemented" << std::endl;
+  exit(-1);
+  return {};
+}
+
 llvm::ArrayRef<mlir::Type> LambdaNode::getCallableResults() {
   auto type = this->getResult().getType().dyn_cast_or_null<LambdaRefType>();
   assert(type && "LambdaNode has invalid result type");
@@ -260,6 +277,13 @@ mlir::CallInterfaceCallable ApplyNode::getCallableForCallee() {
 
 mlir::Operation::operand_range ApplyNode::getArgOperands() {
   return this->getOperands().drop_front();
+}
+
+void ApplyNode::setCalleeFromCallable(CallInterfaceCallable callee)
+{
+  // TODO - Implement this function
+  std::cerr << "void ApplyNode::setCalleeFromCallable(CallInterfaceCallable callee) - has not been implemented" << std::endl;
+  exit(-1);
 }
 
 /**
