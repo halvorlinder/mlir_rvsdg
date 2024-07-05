@@ -21,26 +21,27 @@ using namespace jlm;
  * Load
  */
 LogicalResult jlm::Load::verify() {
-  if (auto llvmPtr = this->getPointer().getType().dyn_cast<mlir::LLVM::LLVMPointerType>()) {
-    if (llvmPtr.isOpaque()) {
-      return LogicalResult::success();
-    }
-  }
-  mlir::Type pointerElementType;
-  if (auto rvsdgPtrType = this->getPointer().getType().dyn_cast_or_null<rvsdg::RVSDGPointerType>()) {
-    pointerElementType = rvsdgPtrType.getElementType();
-  } else if (auto llvmPtrType = this->getPointer().getType().dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
-    pointerElementType = llvmPtrType.getElementType(); 
-  } else {
-    return emitOpError(" has a pointer that is not a pointer type.");
-  }
+// All pointers are opaque in LLVM 18 so this function has no purpose
+//  if (auto llvmPtr = this->getPointer().getType().dyn_cast<mlir::LLVM::LLVMPointerType>()) {
+//    if (llvmPtr.isOpaque()) {
+//      return LogicalResult::success();
+//    }
+//  }
+//  mlir::Type pointerElementType;
+//  if (auto rvsdgPtrType = this->getPointer().getType().dyn_cast_or_null<rvsdg::RVSDGPointerType>()) {
+//    pointerElementType = rvsdgPtrType.getElementType();
+//  } else if (auto llvmPtrType = this->getPointer().getType().dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
+//    pointerElementType = llvmPtrType.getElementType();
+//  } else {
+//    return emitOpError(" has a pointer that is not a pointer type.");
+//  }
 
-  auto outputType = this->getOutput().getType();
-  if (pointerElementType != outputType) {
-    return emitOpError(" has a type mismatch between pointer and output.")
-           << " Pointer element type: " << pointerElementType
-           << " Output type: " << outputType;
-  }
+//  auto outputType = this->getOutput().getType();
+//  if (pointerElementType != outputType) {
+//    return emitOpError(" has a type mismatch between pointer and output.")
+//           << " Pointer element type: " << pointerElementType
+//           << " Output type: " << outputType;
+//  }
   return LogicalResult::success();
 }
 
@@ -48,26 +49,27 @@ LogicalResult jlm::Load::verify() {
 * Store
 */
 LogicalResult jlm::Store::verify() {
-  if (auto llvmPtr = this->getPointer().getType().dyn_cast<mlir::LLVM::LLVMPointerType>()) {
-    if (llvmPtr.isOpaque()) {
-      return LogicalResult::success();
-    }
-  }
-  mlir::Type pointerElementType;
-  if (auto rvsdgPtrType = this->getPointer().getType().dyn_cast_or_null<rvsdg::RVSDGPointerType>()) {
-    pointerElementType = rvsdgPtrType.getElementType();
-  } else if (auto llvmPtrType = this->getPointer().getType().dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
-    pointerElementType = llvmPtrType.getElementType(); 
-  } else {
-    return emitOpError(" has a pointer that is not a pointer type.");
-  }
-
-  auto valueType = this->getValue().getType();
-  if (pointerElementType != valueType) {
-    return emitOpError(" has a type mismatch between pointer and value.")
-           << " Pointer element type: " << pointerElementType
-           << " Value type: " << valueType;
-  }
+// All pointers are opaque in LLVM 18 so this function has no purpose
+//  if (auto llvmPtr = this->getPointer().getType().dyn_cast<mlir::LLVM::LLVMPointerType>()) {
+//    if (llvmPtr.isOpaque()) {
+//      return LogicalResult::success();
+//    }
+//  }
+//  mlir::Type pointerElementType;
+//  if (auto rvsdgPtrType = this->getPointer().getType().dyn_cast_or_null<rvsdg::RVSDGPointerType>()) {
+//    pointerElementType = rvsdgPtrType.getElementType();
+//  } else if (auto llvmPtrType = this->getPointer().getType().dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
+//    pointerElementType = llvmPtrType.getElementType();
+//  } else {
+//    return emitOpError(" has a pointer that is not a pointer type.");
+//  }
+//
+//  auto valueType = this->getValue().getType();
+//  if (pointerElementType != valueType) {
+//    return emitOpError(" has a type mismatch between pointer and value.")
+//           << " Pointer element type: " << pointerElementType
+//           << " Value type: " << valueType;
+//  }
   return LogicalResult::success();
 }
 
@@ -75,27 +77,29 @@ LogicalResult jlm::Store::verify() {
  * Alloca
  */
 LogicalResult jlm::Alloca::verify() {
-  auto outputType = this->getOutput().getType();
-  if (auto llvmPtrType = outputType.dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
-    if (llvmPtrType.isOpaque()) {
-      return LogicalResult::success();
-    }
-  }
+// All pointers are opaque in LLVM 18 so this function has no purpose
+//  auto outputType = this->getOutput().getType();
+//  if (auto llvmPtrType = outputType.dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
+//    if (llvmPtrType.isOpaque()) {
+//      return LogicalResult::success();
+//    }
+//  }
 
-  mlir::Type elementType;
-  if (auto rvsdgPtrType = outputType.dyn_cast_or_null<rvsdg::RVSDGPointerType>()) {
-    elementType = rvsdgPtrType.getElementType();
-  } else if (auto llvmPtrType = outputType.dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()){
-    elementType = llvmPtrType.getElementType();
-  } else {
-    return emitOpError(" has an output that is not a pointer type.");
-  }
-  auto valueType = this->getTypeAttr();
-  if (elementType != valueType) {
-    return emitOpError(" has a type mismatch between output pointer and allocated type.")
-           << " Pointer element type: " << elementType
-           << " Allocated type: " << valueType;
-  }
+//  mlir::Type elementType;
+//  if (auto rvsdgPtrType = outputType.dyn_cast_or_null<rvsdg::RVSDGPointerType>()) {
+//    elementType = rvsdgPtrType.getElementType();
+//  } else if (auto llvmPtrType = outputType.dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()){
+//    elementType = llvmPtrType.getElementType();
+//  } else {
+//    return emitOpError(" has an output that is not a pointer type.");
+//  }
+//  auto valueType = this->getTypeAttr();
+//  if (elementType != valueType) {
+//    return emitOpError(" has a type mismatch between output pointer and allocated type.")
+//           << " Pointer element type: " << elementType
+//           << " Allocated type: " << valueType;
+//  }
+
   return LogicalResult::success();
 }
 
