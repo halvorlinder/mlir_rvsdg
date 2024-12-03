@@ -92,6 +92,29 @@ def JLM_Free: JLM_Op<"free"> {
     );
 }
 
+def JLM_Call: JLM_Op<"call"> {
+    let summary = "Call a function";
+    let description = [{
+        Call a function.
+    }];
+
+    let arguments = (ins
+        LLVMPointerType:$callee,
+        Variadic<AnyType>:$args,
+        RVSDG_IOState:$inputIoState,
+        RVSDG_MemState:$inputMemState
+    );
+
+    let results = (outs
+        Optional<AnyType>:$outputValue,
+        RVSDG_IOState:$outputIoState,
+        RVSDG_MemState:$outputMemState
+    );
+
+    // let assemblyFormat = "attr-dict $size, $alignment `(` $inputMemStates `)` `->` type($output) `,` type($outputMemState)";
+    // let hasVerifier = 1;
+}
+
 def JLM_Memcpy: JLM_Op<"memcpy"> {
     let summary = "Copy memory content from one location to another";
     let description = [{
