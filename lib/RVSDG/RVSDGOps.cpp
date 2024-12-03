@@ -489,21 +489,21 @@ LogicalResult DeltaResult::verify() {
   if (parent == NULL) {
     return emitOpError("DeltaResult has no parent of type DeltaNode.");
   }
-  auto resultType = this->getOperand().getType();
-  auto outputType = parent.getOutput().getType();
-  mlir::Type outputElementType;
-  if (auto rvsdgPtrType = outputType.dyn_cast_or_null<RVSDGPointerType>()) {
-    outputElementType = rvsdgPtrType.getElementType();
-  }
+  // auto resultType = this->getOperand().getType();
+  // auto outputType = parent.getOutput().getType();
+  // mlir::Type outputElementType;
+  // if (auto rvsdgPtrType = outputType.dyn_cast_or_null<RVSDGPointerType>()) {
+  //   outputElementType = rvsdgPtrType.getElementType();
+  // }
 // All pointers are opaque in LLVM 18 so this check does not make sense
 //  else if (auto llvmPtrType = outputType.dyn_cast_or_null<mlir::LLVM::LLVMPointerType>()) {
 //    outputElementType = llvmPtrType.getElementType();
 //  }
-  if (resultType != outputElementType) {
-    return emitOpError("Type mismatch between DeltaResult and DeltaNode output.")
-           << " DeltaResult type: " << resultType
-           << " DeltaNode output element type: " << outputElementType;
-  }
+  // if (resultType != outputElementType) {
+  //   return emitOpError("Type mismatch between DeltaResult and DeltaNode output.")
+  //          << " DeltaResult type: " << resultType
+  //          << " DeltaNode output element type: " << outputElementType;
+  // }
   return LogicalResult::success();
 }
 
