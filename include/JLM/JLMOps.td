@@ -61,8 +61,7 @@ def JLM_Alloca: JLM_Op<"alloca"> {
     let arguments = (ins
         TypeAttr:$valueType,
         AnySignlessInteger:$size,
-        UI32Attr:$alignment,
-        Variadic<RVSDG_MemState>:$inputMemStates
+        UI32Attr:$alignment
     );
 
     let results = (outs
