@@ -22,16 +22,20 @@ using namespace jlm;
  */
 // TODO: Either eliminate the function or provide useful verification
 //       Used to check pointer type but pointers have become opaque
-LogicalResult jlm::Load::verify() {
+LogicalResult
+jlm::Load::verify()
+{
   return LogicalResult::success();
 }
 
 /*
-* Store
-*/
+ * Store
+ */
 // TODO: Either eliminate the function or provide useful verification
 //       Used to check pointer type but pointers have become opaque
-LogicalResult jlm::Store::verify() {
+LogicalResult
+jlm::Store::verify()
+{
   return LogicalResult::success();
 }
 
@@ -40,20 +44,27 @@ LogicalResult jlm::Store::verify() {
  */
 // TODO: Either eliminate the function or provide useful verification
 //       Used to check pointer type but pointers have become opaque
-LogicalResult jlm::Alloca::verify() {
+LogicalResult
+jlm::Alloca::verify()
+{
   return LogicalResult::success();
 }
 
 /**
  * ConstantDataArray
  */
-LogicalResult jlm::ConstantDataArray::verify() {
+LogicalResult
+jlm::ConstantDataArray::verify()
+{
 
   auto operands = this->getOperands().getTypes();
-  if (!operands.empty()) {
+  if (!operands.empty())
+  {
     auto firstType = operands.front();
-    for (auto operand : operands) {
-      if (operand != firstType) {
+    for (auto operand : operands)
+    {
+      if (operand != firstType)
+      {
         return emitOpError("All operands must have the same type.");
       }
     }
@@ -65,12 +76,50 @@ LogicalResult jlm::ConstantDataArray::verify() {
 /**
  * IOBarrier
  */
-LogicalResult jlm::IOBarrier::verify() {
+LogicalResult
+jlm::IOBarrier::verify()
+{
   auto inputType = this->getOperand(0).getType();
   auto outputType = this->getResult().getType();
-  if (inputType != outputType) {
+  if (inputType != outputType)
+  {
     return emitOpError("Input and output types must be the same.");
   }
+  return LogicalResult::success();
+}
+
+/**
+ * Call
+ */
+LogicalResult
+jlm::Call::verify()
+{
+  auto callee = this->getOperand(0).getType();
+  auto castedCallee = callee.dyn_cast_or_null<mlir::FunctionType>();
+  if (castedCallee == nullptr)
+  {
+    return emitOpError("Callee must be a function.");
+  }
+  for (size_t i = 1; i < this->getNumOperands(); ++i)
+  {
+    if (this->getOperand(i).getType() != castedCallee.getInputs()[i - 1])
+    {
+      return emitOpError(" has mismatched operand types. Operand #")
+          << i << " has type " << this->getOperand(i).getType() << ", but callee argument #"
+          << i - 1 << " has type " << castedCallee.getInputs()[i - 1];
+    }
+  }
+
+  for (size_t i = 0; i < castedCallee.getResults().size(); ++i)
+  {
+    if (this->getResult(i).getType() != castedCallee.getResults()[i])
+    {
+      return emitOpError(" has mismatched result types. Result #")
+          << i << " has type " << this->getResult(i).getType() << ", but callee result #" << i
+          << " has type " << castedCallee.getResults()[i];
+    }
+  }
+
   return LogicalResult::success();
 }
 
@@ -83,7 +132,9 @@ LogicalResult jlm::IOBarrier::verify() {
 /**
  * Implement dialect method for registering Ops
  */
-void mlir::jlm::JLMDialect::addJLMOps() {
+void
+mlir::jlm::JLMDialect::addJLMOps()
+{
   addOperations<
 #define GET_OP_LIST
 #include "JLM/Ops.cpp.inc"

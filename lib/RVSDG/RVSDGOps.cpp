@@ -5,6 +5,7 @@
 #include "mlir/Support/LogicalResult.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
 #include "RVSDG/RVSDGASMDirectives.h"
 #include "RVSDG/RVSDGDialect.h"
@@ -115,6 +116,30 @@ GammaResult::verify()
 LogicalResult
 LambdaNode::verify()
 {
+  auto operands = this->getOperands();
+  auto args = this->getRegion().getArguments();
+  auto numFunctionArgs = args.size() - operands.size();
+  for (size_t i = 0; i < operands.size(); ++i) {
+    if (operands[i].getType() != args[i + numFunctionArgs].getType()) {
+      return emitOpError(" has mismatched operand types. Operand #")
+          << i << " has type " << operands[i].getType() << ", but region argument #" << i + numFunctionArgs
+          << " has type " << args[i + numFunctionArgs].getType();
+    }
+  }
+  auto refType = this->getResult().getType();
+  auto castedRefType = refType.dyn_cast_or_null<mlir::FunctionType>();
+  if (castedRefType == nullptr) {
+    return emitOpError(" has invalid result type. Expected FunctionType, got ")
+        << refType;
+  }
+  for (size_t i = 0; i < numFunctionArgs; ++i) {
+    if (args[i].getType() != castedRefType.getInputs()[i]) {
+      return emitOpError(" has mismatched operand types. Operand #")
+          << i << " has type " << args[i].getType() << ", but region argument #" << i
+          << " has type " << castedRefType.getInputs()[i];
+    }
+  }
+  
   return LogicalResult::success();
 }
 
@@ -134,7 +159,20 @@ LambdaResult::verify()
         "LambdaResult has no parent of type LambdaNode. This error should "
         "never appear, so if it does, may God have mercy on your soul");
   }
-
+  auto refType = parent.getResult().getType();
+  auto castedRefType = refType.dyn_cast_or_null<mlir::FunctionType>();
+  auto operands = this->getOperands();
+  if (operands.size() != castedRefType.getResults().size()) {
+    return emitOpError(" has mismatched number of operands and return types. Expected ")
+        << castedRefType.getResults().size() << ", got " << operands.size();
+  }
+  for (size_t i = 0; i < castedRefType.getResults().size(); ++i) {
+    if (operands[i].getType() != castedRefType.getResults()[i]) {
+      return emitOpError(" has mismatched operand types. Operand #")
+          << i << " has type " << operands[i].getType() << ", but region argument #" << i
+          << " has type " << castedRefType.getResults()[i];
+    }
+  }
   return LogicalResult::success();
 }
 

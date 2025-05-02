@@ -94,7 +94,7 @@ def JLM_Call: JLM_Op<"call"> {
     );
 
     // let assemblyFormat = "attr-dict $size, $alignment `(` $inputMemStates `)` `->` type($output) `,` type($outputMemState)";
-    // let hasVerifier = 1;
+    let hasVerifier = 1;
 }
 
 def JLM_Free: JLM_Op<"free"> {
