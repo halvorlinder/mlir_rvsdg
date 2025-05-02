@@ -128,29 +128,46 @@ struct ImportPolygeistPass
     }
     else if (auto funcType = mlir::dyn_cast<mlir::FunctionType>(type))
     {
-      return ConvertFunctionType(funcType.getInputs(), funcType.getResults(), builder);
+      return ConvertFunctionType(funcType.getInputs(), funcType.getResults(), false, builder);
     }
     else if (auto funcType = mlir::dyn_cast<mlir::LLVM::LLVMFunctionType>(type))
     {
-      return ConvertFunctionType(funcType.getParams(), funcType.getReturnTypes(), builder);
+
+      return ConvertFunctionType(
+          funcType.getParams(),
+          funcType.getReturnTypes(),
+          funcType.isVarArg(),
+          builder);
     }
     return type;
   }
 
   // Helper method to convert function types
   mlir::Type
-  ConvertFunctionType(mlir::TypeRange inputs, mlir::TypeRange outputs, mlir::OpBuilder & builder)
+  ConvertFunctionType(
+      mlir::TypeRange inputs,
+      mlir::TypeRange outputs,
+      bool isVarArg,
+      mlir::OpBuilder & builder)
   {
     auto convertedInputs = std::vector<mlir::Type>();
     for (auto input : inputs)
     {
       convertedInputs.push_back(ConvertType(input, builder));
     }
+    if (isVarArg)
+    {
+      convertedInputs[convertedInputs.size() - 1] = builder.getType<mlir::jlm::VarargListType>();
+    }
+    convertedInputs.push_back(builder.getType<mlir::rvsdg::IOStateEdgeType>());
+    convertedInputs.push_back(builder.getType<mlir::rvsdg::MemStateEdgeType>());
     auto convertedOutputs = std::vector<mlir::Type>();
     for (auto output : outputs)
     {
       convertedOutputs.push_back(ConvertType(output, builder));
     }
+    convertedOutputs.push_back(builder.getType<mlir::rvsdg::IOStateEdgeType>());
+    convertedOutputs.push_back(builder.getType<mlir::rvsdg::MemStateEdgeType>());
     return builder.getType<mlir::FunctionType>(convertedInputs, convertedOutputs);
   }
 
@@ -648,17 +665,17 @@ struct ImportPolygeistPass
         }
 
         lambdaBlock.addArgument(
+            builder.getType<mlir::rvsdg::IOStateEdgeType>(),
+            builder.getUnknownLoc());
+        newestIOState = lambdaBlock.getArguments().back();
+
+        lambdaBlock.addArgument(
             builder.getType<mlir::rvsdg::MemStateEdgeType>(),
             builder.getUnknownLoc());
         newestMemState =
             lambdaBlock.getArguments()
                 .back(); // These should not need to be reset, as the func ops are located in the
                          // module region, where there are no memstates or iostates
-        lambdaBlock.addArgument(
-            builder.getType<mlir::rvsdg::IOStateEdgeType>(),
-            builder.getUnknownLoc());
-        newestIOState = lambdaBlock.getArguments().back();
-
         for (auto dependency : contextVars)
         {
           lambdaBlock.addArgument(
@@ -668,9 +685,7 @@ struct ImportPolygeistPass
         }
         for (auto name : contextNames)
         {
-          lambdaBlock.addArgument(
-              ConvertType(nameMap[name].getType(), builder),
-              builder.getUnknownLoc());
+          lambdaBlock.addArgument(nameMap[name].getType(), builder.getUnknownLoc());
           blockArgsNameMap[name] = lambdaBlock.getArguments().back();
         }
 
@@ -749,6 +764,7 @@ struct ImportPolygeistPass
     }
     else if (auto funcOp = mlir::dyn_cast<mlir::LLVM::LLVMFuncOp>(op))
     {
+      auto funcType = funcOp.getFunctionType();
       auto type = ConvertType(funcOp.getFunctionType(), builder);
       auto omegaArgument = builder.create<::mlir::rvsdg::OmegaArgument>(
           builder.getUnknownLoc(),
@@ -852,7 +868,9 @@ struct ImportPolygeistPass
       resultBlock.push_back(load);
       return load;
     }
-    else if (mlir::isa<mlir::memref::CastOp>(op) || mlir::isa<mlir::polygeist::Pointer2MemrefOp>(op) || mlir::isa<mlir::polygeist::Memref2PointerOp>(op))
+    else if (
+        mlir::isa<mlir::memref::CastOp>(op) || mlir::isa<mlir::polygeist::Pointer2MemrefOp>(op)
+        || mlir::isa<mlir::polygeist::Memref2PointerOp>(op))
     {
       valueMap[op.getResult(0)] = ConvertValue(op.getOperand(0), valueMap);
       return nullptr;
@@ -894,11 +912,39 @@ struct ImportPolygeistPass
       resultTypes.push_back(builder.getType<mlir::rvsdg::MemStateEdgeType>());
       auto callee = callOp.getCallee();
       assert(callee.has_value());
+      auto convertedCallee = ConvertName(callee.value().str(), nameMap);
+      auto funcRef = convertedCallee.getType().cast<mlir::FunctionType>();
+      auto callInputs = inputs;
+      auto hasVarArgs = false;
+      for (auto input : funcRef.getInputs())
+      {
+        if (input.isa<mlir::jlm::VarargListType>())
+        {
+          hasVarArgs = true;
+          break;
+        }
+      }
+      if (hasVarArgs)
+      {
+        auto numVarArgs = inputs.size() - (funcRef.getNumInputs() - 3);
+        auto varArgsStartIndex = inputs.size() - numVarArgs;
+        assert(funcRef.getInput(varArgsStartIndex).isa<mlir::jlm::VarargListType>());
+        auto varArgs = builder.create<mlir::jlm::CreateVarArgList>(
+            builder.getUnknownLoc(),
+            builder.getType<mlir::jlm::VarargListType>(),
+            mlir::ValueRange({ std::next(inputs.begin(), varArgsStartIndex),
+                               std::next(inputs.begin(), varArgsStartIndex + numVarArgs) }));
+        resultBlock.push_back(varArgs);
+
+        callInputs = llvm::SmallVector<mlir::Value>{ inputs.begin(),
+                                                     std::next(inputs.begin(), varArgsStartIndex) };
+        callInputs.push_back(varArgs.getResult());
+      }
       auto call = builder.create<mlir::jlm::Call>(
           builder.getUnknownLoc(),
           resultTypes,
-          ConvertName(callee.value().str(), nameMap),
-          inputs,
+          convertedCallee,
+          callInputs,
           newestIOState,
           newestMemState);
       newestIOState = call.getOutputIoState();
@@ -941,8 +987,8 @@ struct ImportPolygeistPass
       {
         returnValues.push_back(ConvertValue(operand, valueMap));
       }
-      returnValues.push_back(newestMemState);
       returnValues.push_back(newestIOState);
+      returnValues.push_back(newestMemState);
       auto lambdaResult =
           builder.create<mlir::rvsdg::LambdaResult>(builder.getUnknownLoc(), returnValues);
       resultBlock.push_back(lambdaResult);
