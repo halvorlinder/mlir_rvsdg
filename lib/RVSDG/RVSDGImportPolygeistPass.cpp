@@ -126,6 +126,10 @@ struct ImportPolygeistPass
     {
       return builder.getType<::mlir::LLVM::LLVMPointerType>();
     }
+    if (auto indexType = mlir::dyn_cast<mlir::IndexType>(type))
+    {
+      return builder.getType<::mlir::IntegerType>(64, ::mlir::IntegerType::Signless);
+    }
     else if (auto funcType = mlir::dyn_cast<mlir::FunctionType>(type))
     {
       return ConvertFunctionType(funcType.getInputs(), funcType.getResults(), false, builder);
@@ -140,6 +144,21 @@ struct ImportPolygeistPass
           builder);
     }
     return type;
+  }
+
+  mlir::TypedAttr
+  ConvertTypedAttr(mlir::TypedAttr attr, mlir::OpBuilder & builder)
+  {
+    if (auto integerAttr = mlir::dyn_cast<mlir::IntegerAttr>(attr))
+    {
+      if (integerAttr.getType().isa<mlir::IndexType>())
+      {
+        return builder.getIntegerAttr(
+            builder.getType<::mlir::IntegerType>(64, ::mlir::IntegerType::Signless),
+            integerAttr.getValue());
+      }
+    }
+    return attr;
   }
 
   // Helper method to convert function types
@@ -210,6 +229,17 @@ struct ImportPolygeistPass
     assert(false);
   }
 
+  // // Helper function for calculating memory offsets for memrefs
+  // mlir::Value
+  // CalculateArrayOffset(
+  //     mlir::Value array,
+  //     mlir::LLVM::LLVMArrayType arrayType,
+  //     mlir::ValueRange indices,
+  //     const std::unordered_map<mlir::Value, mlir::Value> & valueMap,
+  //     mlir::Block & resultBlock,
+  //     mlir::OpBuilder & builder)
+  // {}
+
   // Helper function for calculating memory offsets for memrefs
   mlir::Value
   CalculateMemrefOffset(
@@ -235,11 +265,6 @@ struct ImportPolygeistPass
     for (int i = nDims - 1; i >= 0; i--)
     {
       auto index = ConvertValue(indices[i], valueMap);
-      auto intIndex = builder.create<mlir::arith::IndexCastOp>(
-          builder.getUnknownLoc(),
-          builder.getIntegerType(64),
-          index);
-      resultBlock.push_back(intIndex);
       auto strideOp = builder.create<mlir::arith::ConstantIntOp>(
           builder.getUnknownLoc(),
           stride,
@@ -248,7 +273,7 @@ struct ImportPolygeistPass
       auto multiplyOp = builder.create<mlir::arith::MulIOp>(
           builder.getUnknownLoc(),
           builder.getType<mlir::IntegerType>(64),
-          intIndex,
+          index,
           strideOp);
       resultBlock.push_back(multiplyOp);
       if (i == nDims - 1)
@@ -271,7 +296,7 @@ struct ImportPolygeistPass
     auto gepOp = builder.create<mlir::LLVM::GEPOp>(
         builder.getUnknownLoc(),
         builder.getType<mlir::LLVM::LLVMPointerType>(),
-        memrefType.getElementType(),
+        ConvertType(memrefType.getElementType(), builder),
         ConvertValue(memref, valueMap),
         currentOutput);
     resultBlock.push_back(gepOp);
@@ -818,10 +843,14 @@ struct ImportPolygeistPass
           builder.getType<::mlir::rvsdg::MemStateEdgeType>(),
           valueType,
           sizeOp.getResult(),
-          (uint32_t)allocaOp.getAlignment().value_or(1),
-          mlir::ValueRange{ newestMemState });
-      newestMemState = alloca.getOutputMemState();
+          (uint32_t)allocaOp.getAlignment().value_or(1));
+      auto memorystatemerge = builder.create<mlir::rvsdg::MemStateMerge>(
+          builder.getUnknownLoc(),
+          builder.getType<::mlir::rvsdg::MemStateEdgeType>(),
+          mlir::ValueRange{ alloca.getOutputMemState(), newestMemState });
+      newestMemState = memorystatemerge.getOutput();
       resultBlock.push_back(alloca);
+      resultBlock.push_back(memorystatemerge);
       return alloca;
     }
     else if (auto storeOp = mlir::dyn_cast<mlir::memref::StoreOp>(op))
@@ -973,7 +1002,7 @@ struct ImportPolygeistPass
           ConvertType(loadOp.getResult().getType(), builder),
           builder.getType<::mlir::rvsdg::MemStateEdgeType>(),
           ConvertValue(loadOp.getOperand(), valueMap),
-          0,
+          1,
           mlir::ValueRange{ newestMemState });
 
       newestMemState = load.getOutputMemState();
@@ -994,22 +1023,249 @@ struct ImportPolygeistPass
       resultBlock.push_back(lambdaResult);
       return lambdaResult;
     }
-    else if (
-        mlir::isa<mlir::arith::ConstantOp>(op) || mlir::isa<mlir::arith::IndexCastOp>(op)
-        || mlir::isa<mlir::arith::SIToFPOp>(op) || mlir::isa<mlir::arith::MulIOp>(op)
-        || mlir::isa<mlir::arith::DivFOp>(op) || mlir::isa<mlir::arith::AddFOp>(op)
-        || mlir::isa<mlir::arith::SubFOp>(op) || mlir::isa<mlir::math::SqrtOp>(op)
-        || mlir::isa<mlir::arith::CmpFOp>(op) || mlir::isa<mlir::arith::CmpIOp>(op)
-        || mlir::isa<mlir::arith::RemSIOp>(op) || mlir::isa<mlir::arith::RemUIOp>(op)
-        || mlir::isa<mlir::arith::AddIOp>(op) || mlir::isa<mlir::arith::SelectOp>(op)
-        || mlir::isa<mlir::arith::MulFOp>(op) || mlir::isa<mlir::LLVM::GEPOp>(op)
-        || mlir::isa<mlir::arith::SubIOp>(op) || mlir::isa<mlir::arith::DivUIOp>(op)
-        || mlir::isa<mlir::arith::DivSIOp>(op) || mlir::isa<mlir::arith::AndIOp>(op))
+    else if (auto constantOp = mlir::dyn_cast<mlir::arith::ConstantOp>(op))
     {
-      auto clonedOp = op.clone();
-      clonedOp->setOperands(inputs);
-      resultBlock.push_back(clonedOp);
-      return clonedOp;
+      auto newOp = builder.create<mlir::arith::ConstantOp>(
+          constantOp.getLoc(),
+          ConvertType(constantOp.getType(), builder),
+          ConvertTypedAttr(constantOp.getValue(), builder));
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto indexCastOp = mlir::dyn_cast<mlir::arith::IndexCastOp>(op))
+    {
+      if (indexCastOp.getType().isa<mlir::IndexType>())
+      {
+        auto inType = inputs[0].getType().cast<mlir::IntegerType>();
+        if (inType.getWidth() < 64)
+        {
+          auto newOp = builder.create<mlir::arith::ExtUIOp>(
+              indexCastOp.getLoc(),
+              ConvertType(indexCastOp.getType(), builder),
+              inputs[0]);
+          resultBlock.push_back(newOp);
+          return newOp;
+        }
+        else if (inType.getWidth() == 64)
+        {
+          valueMap[op.getResult(0)] = ConvertValue(op.getOperand(0), valueMap);
+          return nullptr;
+        }
+        else
+        {
+          assert(false && "IndexCastOp for > 64 bits not implemented");
+        }
+      }
+      else
+      {
+        auto outType = indexCastOp.getType().cast<mlir::IntegerType>();
+        if (outType.getWidth() < 64)
+        {
+          auto newOp = builder.create<mlir::arith::TruncIOp>(
+              indexCastOp.getLoc(),
+              ConvertType(indexCastOp.getType(), builder),
+              inputs[0]);
+          resultBlock.push_back(newOp);
+          return newOp;
+        }
+        else if (outType.getWidth() == 64)
+        {
+          valueMap[op.getResult(0)] = ConvertValue(op.getOperand(0), valueMap);
+          return nullptr;
+        }
+        else
+        {
+          assert(false && "IndexCastOp for > 64 bits not implemented");
+        }
+      }
+    }
+    else if (auto siToFpOp = mlir::dyn_cast<mlir::arith::SIToFPOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::SIToFPOp>(
+          siToFpOp.getLoc(),
+          ConvertType(siToFpOp.getResult().getType(), builder),
+          inputs[0]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto mulIOp = mlir::dyn_cast<mlir::arith::MulIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::MulIOp>(
+          mulIOp.getLoc(),
+          ConvertType(mulIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto divFOp = mlir::dyn_cast<mlir::arith::DivFOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::DivFOp>(
+          divFOp.getLoc(),
+          ConvertType(divFOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto addFOp = mlir::dyn_cast<mlir::arith::AddFOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::AddFOp>(
+          addFOp.getLoc(),
+          ConvertType(addFOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto subFOp = mlir::dyn_cast<mlir::arith::SubFOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::SubFOp>(
+          subFOp.getLoc(),
+          ConvertType(subFOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto sqrtOp = mlir::dyn_cast<mlir::math::SqrtOp>(op))
+    {
+      auto newOp = builder.create<mlir::math::SqrtOp>(
+          sqrtOp.getLoc(),
+          ConvertType(sqrtOp.getResult().getType(), builder),
+          inputs[0]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto cmpFOp = mlir::dyn_cast<mlir::arith::CmpFOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::CmpFOp>(
+          cmpFOp.getLoc(),
+          ConvertType(cmpFOp.getResult().getType(), builder),
+          cmpFOp.getPredicate(),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto cmpIOp = mlir::dyn_cast<mlir::arith::CmpIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::CmpIOp>(
+          cmpIOp.getLoc(),
+          ConvertType(cmpIOp.getResult().getType(), builder),
+          cmpIOp.getPredicate(),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto remSIOp = mlir::dyn_cast<mlir::arith::RemSIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::RemSIOp>(
+          remSIOp.getLoc(),
+          ConvertType(remSIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto remUIOp = mlir::dyn_cast<mlir::arith::RemUIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::RemUIOp>(
+          remUIOp.getLoc(),
+          ConvertType(remUIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto addIOp = mlir::dyn_cast<mlir::arith::AddIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::AddIOp>(
+          addIOp.getLoc(),
+          ConvertType(addIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto selectOp = mlir::dyn_cast<mlir::arith::SelectOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::SelectOp>(
+          selectOp.getLoc(),
+          ConvertType(selectOp.getResult().getType(), builder),
+          inputs[0], // condition
+          inputs[1], // true value
+          inputs[2]  // false value
+      );
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto mulFOp = mlir::dyn_cast<mlir::arith::MulFOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::MulFOp>(
+          mulFOp.getLoc(),
+          ConvertType(mulFOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto gepOp = mlir::dyn_cast<mlir::LLVM::GEPOp>(op))
+    {
+      assert(gepOp.getSourceElementType().isa<mlir::LLVM::LLVMArrayType>() && "GEP source must be an array");
+      // Need to do the same index thing as load and store
+      auto newOp = op.clone();
+      newOp->setOperands(inputs);
+
+      // auto gep = builder.create<mlir::LLVM::GEPOp>(
+      //     builder.getUnknownLoc(),
+      //     builder.getType<mlir::LLVM::LLVMPointerType>(),
+      //     gepOp.getElemType().value(),
+      //     inputs[0],
+      //     inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto subIOp = mlir::dyn_cast<mlir::arith::SubIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::SubIOp>(
+          subIOp.getLoc(),
+          ConvertType(subIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto divUIOp = mlir::dyn_cast<mlir::arith::DivUIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::DivUIOp>(
+          divUIOp.getLoc(),
+          ConvertType(divUIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto divSIOp = mlir::dyn_cast<mlir::arith::DivSIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::DivSIOp>(
+          divSIOp.getLoc(),
+          ConvertType(divSIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto andIOp = mlir::dyn_cast<mlir::arith::AndIOp>(op))
+    {
+      auto newOp = builder.create<mlir::arith::AndIOp>(
+          andIOp.getLoc(),
+          ConvertType(andIOp.getResult().getType(), builder),
+          inputs[0],
+          inputs[1]);
+      resultBlock.push_back(newOp);
+      return newOp;
     }
     else
     {
