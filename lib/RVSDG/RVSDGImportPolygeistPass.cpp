@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -20,8 +21,12 @@
 #include "polygeist/Ops.h"
 #include "RVSDG/RVSDGDialect.h"
 #include "RVSDG/RVSDGPasses.h"
+#include <functional>
 #include <iostream>
+#include <llvm/ADT/SmallVector.h>
 #include <mlir/Pass/PassManager.h>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -53,6 +58,79 @@ namespace mlir::rvsdg::importPolygeistPass
 {
 #define GEN_PASS_DEF_RVSDG_IMPORTPOLYGEISTPASS
 #include "RVSDG/Passes.h.inc"
+}
+
+// Helper function to convert IndexType to IntegerType(64)
+static mlir::Type
+convertIndexToInt64(mlir::Type type, mlir::OpBuilder & builder)
+{
+  if (type.isa<mlir::IndexType>())
+  {
+    return builder.getI64Type();
+  }
+  return type;
+}
+
+// Function to replace math operations with function calls
+static void
+ReplaceMathDialectOperationsWithFunctionCalls(mlir::ModuleOp module)
+{
+  mlir::SymbolTable symbolTable(module);
+  mlir::OpBuilder moduleBuilder(module.getBodyRegion());
+  std::vector<mlir::Operation *> opsToErase;
+
+  module.walk(
+      [&](mlir::Operation * op)
+      {
+        if (op->getDialect()->getNamespace() == mlir::math::MathDialect::getDialectNamespace())
+        {
+          mlir::OpBuilder builder(op);
+          std::string opName = op->getName().stripDialect().str();
+          std::string funcName = opName; // Use dialect prefix for clarity
+
+          // Convert operand types
+          llvm::SmallVector<mlir::Type> operandTypes;
+          for (mlir::Value operand : op->getOperands())
+          {
+            operandTypes.push_back(convertIndexToInt64(operand.getType(), builder));
+          }
+
+          // Convert result types
+          llvm::SmallVector<mlir::Type> resultTypes;
+          for (mlir::Value result : op->getResults())
+          {
+            resultTypes.push_back(convertIndexToInt64(result.getType(), builder));
+          }
+
+          // Check if function declaration exists, create if not
+          mlir::func::FuncOp func = symbolTable.lookup<mlir::func::FuncOp>(funcName);
+          if (!func)
+          {
+            auto funcType = builder.getFunctionType(operandTypes, resultTypes);
+            func = moduleBuilder.create<mlir::func::FuncOp>(module.getLoc(), funcName, funcType);
+            func.setPrivate(); // Mark as private since it's an internal helper
+            symbolTable.insert(func);
+          }
+
+          // Create the function call
+          auto callOp = builder.create<mlir::func::CallOp>(op->getLoc(), func, op->getOperands());
+
+          // Replace uses of the math op with the call op results
+          for (auto it : llvm::zip(op->getResults(), callOp.getResults()))
+          {
+            std::get<0>(it).replaceAllUsesWith(std::get<1>(it));
+          }
+
+          // Mark the original math op for deletion
+          opsToErase.push_back(op);
+        }
+      });
+
+  // Erase the original math operations
+  for (mlir::Operation * op : opsToErase)
+  {
+    op->erase();
+  }
 }
 
 struct ImportPolygeistPass
@@ -96,6 +174,7 @@ struct ImportPolygeistPass
     preTransformPm.addPass(mlir::createLowerAffinePass());
     preTransformPm.run(module);
 
+    ReplaceMathDialectOperationsWithFunctionCalls(module);
     SortGlobals(module);
     GetUsedValues(module);
 
@@ -229,16 +308,71 @@ struct ImportPolygeistPass
     assert(false);
   }
 
-  // // Helper function for calculating memory offsets for memrefs
-  // mlir::Value
-  // CalculateArrayOffset(
-  //     mlir::Value array,
-  //     mlir::LLVM::LLVMArrayType arrayType,
-  //     mlir::ValueRange indices,
-  //     const std::unordered_map<mlir::Value, mlir::Value> & valueMap,
-  //     mlir::Block & resultBlock,
-  //     mlir::OpBuilder & builder)
-  // {}
+  mlir::Value
+  CalculateOffset(
+      mlir::ValueRange indices,
+      llvm::ArrayRef<int64_t> shape,
+      const std::unordered_map<mlir::Value, mlir::Value> & valueMap,
+      mlir::Block & resultBlock,
+      mlir::OpBuilder & builder)
+  {
+    mlir::Value currentOutput;
+    size_t stride = 1;
+    for (int i = shape.size() - 1; i >= 0; i--)
+    {
+      auto index = ConvertValue(indices[i], valueMap);
+      auto strideOp = builder.create<mlir::arith::ConstantIntOp>(
+          builder.getUnknownLoc(),
+          stride,
+          builder.getIntegerType(64));
+      resultBlock.push_back(strideOp);
+      auto multiplyOp = builder.create<mlir::arith::MulIOp>(
+          builder.getUnknownLoc(),
+          builder.getType<mlir::IntegerType>(64),
+          index,
+          strideOp);
+      resultBlock.push_back(multiplyOp);
+      if (i == shape.size() - 1)
+      {
+        currentOutput = multiplyOp;
+      }
+      else
+      {
+        auto addOp = builder.create<mlir::arith::AddIOp>(
+            builder.getUnknownLoc(),
+            builder.getType<mlir::IntegerType>(64),
+            currentOutput,
+            multiplyOp);
+        resultBlock.push_back(addOp);
+        currentOutput = addOp;
+      }
+      stride *= shape[i];
+    }
+    return currentOutput;
+  }
+
+  // Helper function for calculating memory offsets for arrays
+  mlir::Operation *
+  CalculateArrayOffset(
+      mlir::Value array,
+      mlir::LLVM::LLVMArrayType arrayType,
+      mlir::ValueRange indices,
+      const std::unordered_map<mlir::Value, mlir::Value> & valueMap,
+      mlir::Block & resultBlock,
+      mlir::OpBuilder & builder)
+  {
+    auto shape = llvm::SmallVector<int64_t>({ arrayType.getNumElements() });
+    auto offset = CalculateOffset(indices, shape, valueMap, resultBlock, builder);
+
+    auto gepOp = builder.create<mlir::LLVM::GEPOp>(
+        builder.getUnknownLoc(),
+        builder.getType<mlir::LLVM::LLVMPointerType>(),
+        ConvertType(arrayType.getElementType(), builder),
+        ConvertValue(array, valueMap),
+        offset);
+    resultBlock.push_back(gepOp);
+    return gepOp;
+  }
 
   // Helper function for calculating memory offsets for memrefs
   mlir::Value
@@ -260,45 +394,14 @@ struct ImportPolygeistPass
       return ConvertValue(memref, valueMap);
     }
 
-    mlir::Value currentOutput;
-    size_t stride = 1;
-    for (int i = nDims - 1; i >= 0; i--)
-    {
-      auto index = ConvertValue(indices[i], valueMap);
-      auto strideOp = builder.create<mlir::arith::ConstantIntOp>(
-          builder.getUnknownLoc(),
-          stride,
-          builder.getIntegerType(64));
-      resultBlock.push_back(strideOp);
-      auto multiplyOp = builder.create<mlir::arith::MulIOp>(
-          builder.getUnknownLoc(),
-          builder.getType<mlir::IntegerType>(64),
-          index,
-          strideOp);
-      resultBlock.push_back(multiplyOp);
-      if (i == nDims - 1)
-      {
-        currentOutput = multiplyOp;
-      }
-      else
-      {
-        auto addOp = builder.create<mlir::arith::AddIOp>(
-            builder.getUnknownLoc(),
-            builder.getType<mlir::IntegerType>(64),
-            currentOutput,
-            multiplyOp);
-        resultBlock.push_back(addOp);
-        currentOutput = addOp;
-      }
-      stride *= memrefType.getShape()[i];
-    }
+    auto offset = CalculateOffset(indices, memrefType.getShape(), valueMap, resultBlock, builder);
 
     auto gepOp = builder.create<mlir::LLVM::GEPOp>(
         builder.getUnknownLoc(),
         builder.getType<mlir::LLVM::LLVMPointerType>(),
         ConvertType(memrefType.getElementType(), builder),
         ConvertValue(memref, valueMap),
-        currentOutput);
+        offset);
     resultBlock.push_back(gepOp);
     return gepOp;
   }
@@ -432,8 +535,8 @@ struct ImportPolygeistPass
           thetaBlock.getArguments(),
           2);
 
-      auto & gammaBlock = gamma.getRegion(0).emplaceBlock();
-      auto & dummyBlock = gamma.getRegion(1).emplaceBlock();
+      auto & gammaBlock = gamma.getRegion(1).emplaceBlock();
+      auto & dummyBlock = gamma.getRegion(0).emplaceBlock();
 
       for (auto arg : gamma.getInputs())
       {
@@ -464,10 +567,18 @@ struct ImportPolygeistPass
 
       thetaBlock.push_back(gamma);
 
-      auto thetaResult = builder.create<mlir::rvsdg::ThetaResult>(
+      auto newInductionVar = builder.create<mlir::arith::AddIOp>(
           builder.getUnknownLoc(),
-          match,
-          thetaBlock.getArguments());
+          thetaBlockInductionVar,
+          thetaBlockStep);
+      thetaBlock.push_back(newInductionVar);
+
+      llvm::SmallVector<mlir::Value> thetaResults = { gamma.getResults().begin(),
+                                                      gamma.getResults().end() };
+      thetaResults[forOp.getNumRegionIterArgs()] = newInductionVar;
+
+      auto thetaResult =
+          builder.create<mlir::rvsdg::ThetaResult>(builder.getUnknownLoc(), match, thetaResults);
 
       thetaBlock.push_back(thetaResult);
 
@@ -508,8 +619,8 @@ struct ImportPolygeistPass
       gammaOutputs.push_back(newestIOState.getType());
 
       ::llvm::SmallVector<::mlir::Attribute> mappingVector = {
-        ::mlir::rvsdg::MatchRuleAttr::get(builder.getContext(), ::llvm::ArrayRef<int64_t>(0), 0),
-        ::mlir::rvsdg::MatchRuleAttr::get(builder.getContext(), ::llvm::ArrayRef<int64_t>(1), 1)
+        ::mlir::rvsdg::MatchRuleAttr::get(builder.getContext(), ::llvm::ArrayRef<int64_t>(0), 1),
+        ::mlir::rvsdg::MatchRuleAttr::get(builder.getContext(), ::llvm::ArrayRef<int64_t>(1), 0)
       };
 
       auto predicate = inputs[0];
@@ -617,6 +728,8 @@ struct ImportPolygeistPass
         {
           results.push_back(resultBlock.getArgument(i));
         }
+        results[results.size() - 2] = newestMemState;
+        results[results.size() - 1] = newestIOState;
         // Gamma result as we are inside the nested gamma
         auto gammaResult =
             builder.create<mlir::rvsdg::GammaResult>(builder.getUnknownLoc(), results);
@@ -1213,18 +1326,34 @@ struct ImportPolygeistPass
     }
     else if (auto gepOp = mlir::dyn_cast<mlir::LLVM::GEPOp>(op))
     {
-      assert(gepOp.getSourceElementType().isa<mlir::LLVM::LLVMArrayType>() && "GEP source must be an array");
-      // Need to do the same index thing as load and store
-      auto newOp = op.clone();
-      newOp->setOperands(inputs);
-
-      // auto gep = builder.create<mlir::LLVM::GEPOp>(
-      //     builder.getUnknownLoc(),
-      //     builder.getType<mlir::LLVM::LLVMPointerType>(),
-      //     gepOp.getElemType().value(),
-      //     inputs[0],
-      //     inputs[1]);
-      resultBlock.push_back(newOp);
+      assert(
+          gepOp.getSourceElementType().isa<mlir::LLVM::LLVMArrayType>()
+          && "GEP source must be an array");
+      auto arrayType = gepOp.getSourceElementType().cast<mlir::LLVM::LLVMArrayType>();
+      auto indices = llvm::SmallVector<mlir::Value>();
+      for (auto index : gepOp.getIndices())
+      {
+        if (auto indexValue = mlir::dyn_cast<mlir::IntegerAttr>(index))
+        {
+          auto indexValueOp = builder.create<mlir::arith::ConstantIntOp>(
+              builder.getUnknownLoc(),
+              indexValue.getInt(),
+              builder.getIntegerType(64));
+          resultBlock.push_back(indexValueOp);
+          indices.push_back(indexValueOp);
+          valueMap[indexValueOp] = indexValueOp; // Hacky, but it works
+        }
+        else if (auto indexValue = mlir::dyn_cast<mlir::Value>(index))
+        {
+          indices.push_back(indexValue);
+        }
+        else
+        {
+          assert(false && "unhandled index type");
+        }
+      }
+      auto newOp =
+          CalculateArrayOffset(gepOp.getBase(), arrayType, indices, valueMap, resultBlock, builder);
       return newOp;
     }
     else if (auto subIOp = mlir::dyn_cast<mlir::arith::SubIOp>(op))
