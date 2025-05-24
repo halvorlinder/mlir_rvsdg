@@ -1420,9 +1420,20 @@ struct ImportPolygeistPass
     // Use the provided builder for conversion
     ConvertRegion(omegaBlock, module.getRegion(), valueMap, nameMap, builder);
 
+    llvm::SmallVector<mlir::Value> outputValues;
+    omegaBlock.walk([&](mlir::Operation * op)
+    {
+      if (auto lambdaNode = mlir::dyn_cast<::mlir::rvsdg::LambdaNode>(op)) {
+        outputValues.push_back(lambdaNode.getResult());
+      }
+      if (auto deltaNode = mlir::dyn_cast<::mlir::rvsdg::DeltaNode>(op)) {
+        outputValues.push_back(deltaNode.getResult());
+      }
+    });
+
     auto omegaResult = builder.create<::mlir::rvsdg::OmegaResult>(
         builder.getUnknownLoc(),
-        mlir::ValueRange{}); // TODO: OmegaResult
+        outputValues);
     omegaBlock.push_back(omegaResult);
 
     return omega;
