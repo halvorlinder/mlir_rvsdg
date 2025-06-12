@@ -984,8 +984,13 @@ struct ImportPolygeistPass
           1,
           mlir::ValueRange{ newestMemState });
 
-      newestMemState = store.getOutputMemState();
+      auto memorystatemerge = builder.create<mlir::rvsdg::MemStateMerge>(
+          builder.getUnknownLoc(),
+          builder.getType<::mlir::rvsdg::MemStateEdgeType>(),
+          store.getOutputMemStates());
+      newestMemState = memorystatemerge.getResult();
       resultBlock.push_back(store);
+      resultBlock.push_back(memorystatemerge);
       return store;
     }
     else if (auto loadOp = mlir::dyn_cast<mlir::memref::LoadOp>(op))
@@ -1006,8 +1011,13 @@ struct ImportPolygeistPass
           1,
           mlir::ValueRange{ newestMemState });
 
-      newestMemState = load.getOutputMemState();
+      auto memorystatemerge = builder.create<mlir::rvsdg::MemStateMerge>(
+          builder.getUnknownLoc(),
+          builder.getType<::mlir::rvsdg::MemStateEdgeType>(),
+          load.getOutputMemStates());
+      newestMemState = memorystatemerge.getResult();
       resultBlock.push_back(load);
+      resultBlock.push_back(memorystatemerge);
       return load;
     }
     else if (
@@ -1118,8 +1128,13 @@ struct ImportPolygeistPass
           1,
           mlir::ValueRange{ newestMemState });
 
-      newestMemState = load.getOutputMemState();
+      auto memorystatemerge = builder.create<mlir::rvsdg::MemStateMerge>(
+          builder.getUnknownLoc(),
+          builder.getType<::mlir::rvsdg::MemStateEdgeType>(),
+          load.getOutputMemStates());
+      newestMemState = memorystatemerge.getResult();
       resultBlock.push_back(load);
+      resultBlock.push_back(memorystatemerge);
       return load;
     }
     else if (auto returnOp = mlir::dyn_cast<mlir::func::ReturnOp>(op))
@@ -1142,6 +1157,14 @@ struct ImportPolygeistPass
           constantOp.getLoc(),
           ConvertType(constantOp.getType(), builder),
           ConvertTypedAttr(constantOp.getValue(), builder));
+      resultBlock.push_back(newOp);
+      return newOp;
+    }
+    else if (auto undefOp = mlir::dyn_cast<mlir::LLVM::UndefOp>(op))
+    {
+      auto newOp = builder.create<mlir::jlm::Undef>(
+          undefOp.getLoc(),
+          ConvertType(undefOp.getType(), builder));
       resultBlock.push_back(newOp);
       return newOp;
     }
