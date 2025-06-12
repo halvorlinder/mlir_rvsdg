@@ -1,6 +1,7 @@
 #map = affine_map<(d0) -> (d0 * 32)>
-#map1 = affine_map<(d0) -> (1300, d0 * 32 + 32)>
-module attributes {} {
+#map1 = affine_map<(d0) -> (1900, d0 * 32 + 32)>
+#map2 = affine_map<(d0) -> (2100, d0 * 32 + 32)>
+module attributes {dlti.dl_spec = #dlti.dl_spec<#dlti.dl_entry<i128, dense<128> : vector<2xi32>>, #dlti.dl_entry<i64, dense<64> : vector<2xi32>>, #dlti.dl_entry<i1, dense<8> : vector<2xi32>>, #dlti.dl_entry<!llvm.ptr, dense<64> : vector<4xi32>>, #dlti.dl_entry<f16, dense<16> : vector<2xi32>>, #dlti.dl_entry<f64, dense<64> : vector<2xi32>>, #dlti.dl_entry<i32, dense<32> : vector<2xi32>>, #dlti.dl_entry<i16, dense<[16, 32]> : vector<2xi32>>, #dlti.dl_entry<f128, dense<128> : vector<2xi32>>, #dlti.dl_entry<i8, dense<[8, 32]> : vector<2xi32>>, #dlti.dl_entry<"dlti.stack_alignment", 128 : i32>, #dlti.dl_entry<"dlti.endianness", "little">>, llvm.data_layout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128", llvm.target_triple = "aarch64-unknown-linux-gnu", "polygeist.target-cpu" = "generic", "polygeist.target-features" = "+fp-armv8,+neon,+outline-atomics,+v8a,-fmv"} {
   llvm.mlir.global internal constant @str7("==END   DUMP_ARRAYS==\0A\00") {addr_space = 0 : i32}
   llvm.mlir.global internal constant @str6("\0Aend   dump: %s\0A\00") {addr_space = 0 : i32}
   llvm.mlir.global internal constant @str5("%0.2lf \00") {addr_space = 0 : i32}
@@ -12,80 +13,62 @@ module attributes {} {
   llvm.func @fprintf(!llvm.ptr, !llvm.ptr, ...) -> i32
   llvm.mlir.global internal constant @str0("\00") {addr_space = 0 : i32}
   func.func @main(%arg0: i32, %arg1: memref<?xmemref<?xi8>>) -> i32 attributes {llvm.linkage = #llvm.linkage<external>} {
-    %cst = arith.constant 1.300000e+03 : f64
-    %cst_0 = arith.constant 0.000000e+00 : f64
-    %cst_1 = arith.constant 1.500000e+00 : f64
-    %cst_2 = arith.constant 1.200000e+00 : f64
-    %c1_i32 = arith.constant 1 : i32
-    %c2_i32 = arith.constant 2 : i32
+    %cst = arith.constant 9.500000e+03 : f64
+    %cst_0 = arith.constant 2.100000e+03 : f64
+    %cst_1 = arith.constant 0.000000e+00 : f64
+    %cst_2 = arith.constant 1.000000e+00 : f64
     %c0_i32 = arith.constant 0 : i32
     %c42_i32 = arith.constant 42 : i32
-    %c1300_i32 = arith.constant 1300 : i32
-    %alloc = memref.alloc() : memref<1300xf64>
-    %alloc_3 = memref.alloc() : memref<1300xf64>
-    %cast = memref.cast %alloc_3 : memref<1300xf64> to memref<?xf64>
-    affine.for %arg2 = 0 to 41 {
+    %c2100_i32 = arith.constant 2100 : i32
+    %alloc = memref.alloc() : memref<2100xf64>
+    %alloc_3 = memref.alloc() : memref<1900xf64>
+    %cast = memref.cast %alloc : memref<2100xf64> to memref<?xf64>
+    affine.for %arg2 = 0 to 60 {
       affine.for %arg3 = #map(%arg2) to min #map1(%arg2) {
-        affine.store %cst_0, %alloc_3[%arg3] : memref<1300xf64>
+        affine.store %cst_1, %alloc_3[%arg3] : memref<1900xf64>
       }
     }
-    affine.for %arg2 = 0 to 41 {
-      affine.for %arg3 = 0 to 41 {
-        affine.for %arg4 = #map(%arg3) to min #map1(%arg3) {
+    affine.for %arg2 = 0 to 60 {
+      affine.for %arg3 = 0 to 66 {
+        affine.for %arg4 = #map(%arg3) to min #map2(%arg3) {
           affine.for %arg5 = #map(%arg2) to min #map1(%arg2) {
-            %1 = arith.index_cast %arg5 : index to i32
-            %2 = arith.index_cast %arg4 : index to i32
-            %3 = arith.muli %1, %2 : i32
-            %4 = arith.addi %3, %c2_i32 : i32
-            %5 = arith.remsi %4, %c1300_i32 : i32
+            %1 = affine.load %alloc_3[%arg5] : memref<1900xf64>
+            %2 = arith.index_cast %arg5 : index to i32
+            %3 = arith.index_cast %arg4 : index to i32
+            %4 = arith.addi %2, %3 : i32
+            %5 = arith.remsi %4, %c2100_i32 : i32
             %6 = arith.sitofp %5 : i32 to f64
             %7 = arith.divf %6, %cst : f64
-            %8 = arith.remsi %2, %c1300_i32 : i32
-            %9 = arith.sitofp %8 : i32 to f64
-            %10 = arith.divf %9, %cst : f64
+            %8 = arith.sitofp %3 : i32 to f64
+            %9 = arith.divf %8, %cst_0 : f64
+            %10 = arith.addf %9, %cst_2 : f64
             %11 = arith.mulf %7, %10 : f64
-            %12 = affine.load %alloc_3[%arg5] : memref<1300xf64>
-            %13 = arith.addf %11, %12 : f64
-            affine.store %13, %alloc_3[%arg5] : memref<1300xf64>
+            %12 = arith.addf %1, %11 : f64
+            affine.store %12, %alloc_3[%arg5] : memref<1900xf64>
           }
         }
       }
     }
-    affine.for %arg2 = 0 to 41 {
-      affine.for %arg3 = #map(%arg2) to min #map1(%arg2) {
-        affine.store %cst_0, %alloc[%arg3] : memref<1300xf64>
+    affine.for %arg2 = 0 to 66 {
+      affine.for %arg3 = #map(%arg2) to min #map2(%arg2) {
+        affine.store %cst_1, %alloc[%arg3] : memref<2100xf64>
       }
     }
-    affine.for %arg2 = 0 to 41 {
-      affine.for %arg3 = 0 to 41 {
-        affine.for %arg4 = #map(%arg3) to min #map1(%arg3) {
-          affine.for %arg5 = #map(%arg2) to min #map1(%arg2) {
-            %1 = arith.index_cast %arg5 : index to i32
-            %2 = arith.index_cast %arg4 : index to i32
-            %3 = arith.muli %1, %2 : i32
-            %4 = arith.addi %3, %c1_i32 : i32
-            %5 = arith.remsi %4, %c1300_i32 : i32
-            %6 = arith.sitofp %5 : i32 to f64
-            %7 = arith.divf %6, %cst : f64
-            %8 = arith.remsi %2, %c1300_i32 : i32
-            %9 = arith.sitofp %8 : i32 to f64
-            %10 = arith.divf %9, %cst : f64
-            %11 = arith.mulf %7, %10 : f64
-            %12 = affine.load %alloc[%arg5] : memref<1300xf64>
-            %13 = arith.addf %11, %12 : f64
-            affine.store %13, %alloc[%arg5] : memref<1300xf64>
-          }
+    affine.for %arg2 = 0 to 1900 {
+      affine.for %arg3 = 0 to 66 {
+        affine.for %arg4 = #map(%arg3) to min #map2(%arg3) {
+          %1 = affine.load %alloc[%arg4] : memref<2100xf64>
+          %2 = arith.index_cast %arg2 : index to i32
+          %3 = arith.index_cast %arg4 : index to i32
+          %4 = arith.addi %2, %3 : i32
+          %5 = arith.remsi %4, %c2100_i32 : i32
+          %6 = arith.sitofp %5 : i32 to f64
+          %7 = arith.divf %6, %cst : f64
+          %8 = affine.load %alloc_3[%arg2] : memref<1900xf64>
+          %9 = arith.mulf %7, %8 : f64
+          %10 = arith.addf %1, %9 : f64
+          affine.store %10, %alloc[%arg4] : memref<2100xf64>
         }
-      }
-    }
-    affine.for %arg2 = 0 to 41 {
-      affine.for %arg3 = #map(%arg2) to min #map1(%arg2) {
-        %1 = affine.load %alloc[%arg3] : memref<1300xf64>
-        %2 = arith.mulf %1, %cst_1 : f64
-        %3 = affine.load %alloc_3[%arg3] : memref<1300xf64>
-        %4 = arith.mulf %3, %cst_2 : f64
-        %5 = arith.addf %2, %4 : f64
-        affine.store %5, %alloc_3[%arg3] : memref<1300xf64>
       }
     }
     %0 = arith.cmpi sgt, %arg0, %c42_i32 : i32
@@ -96,11 +79,11 @@ module attributes {} {
       %4 = func.call @strcmp(%1, %3) : (memref<?xi8>, memref<?xi8>) -> i32
       %5 = arith.cmpi eq, %4, %c0_i32 : i32
       scf.if %5 {
-        func.call @print_array(%c1300_i32, %cast) : (i32, memref<?xf64>) -> ()
+        func.call @print_array(%c2100_i32, %cast) : (i32, memref<?xf64>) -> ()
       }
     }
-    memref.dealloc %alloc : memref<1300xf64>
-    memref.dealloc %alloc_3 : memref<1300xf64>
+    memref.dealloc %alloc : memref<2100xf64>
+    memref.dealloc %alloc_3 : memref<1900xf64>
     return %c0_i32 : i32
   }
   func.func private @strcmp(memref<?xi8>, memref<?xi8>) -> i32 attributes {llvm.linkage = #llvm.linkage<external>}
