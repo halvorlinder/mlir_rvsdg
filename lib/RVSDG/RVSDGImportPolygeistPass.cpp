@@ -1350,9 +1350,9 @@ struct ImportPolygeistPass
     else if (auto gepOp = mlir::dyn_cast<mlir::LLVM::GEPOp>(op))
     {
       assert(
-          gepOp.getSourceElementType().isa<mlir::LLVM::LLVMArrayType>()
+          gepOp.getElemType().isa<mlir::LLVM::LLVMArrayType>()
           && "GEP source must be an array");
-      auto arrayType = gepOp.getSourceElementType().cast<mlir::LLVM::LLVMArrayType>();
+      auto arrayType = gepOp.getElemType().cast<mlir::LLVM::LLVMArrayType>();
       auto indices = llvm::SmallVector<mlir::Value>();
       for (auto index : gepOp.getIndices())
       {
